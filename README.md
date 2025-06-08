@@ -78,6 +78,27 @@ fi
 
 > If all lines in a section are commented, it comments the entire block and renumbers subsequent sections.
 
+**Changelog Example:**
+```
+===== CHANGELOG SUMMARY =====
+Sections with keyword-based commenting:
+  • Section 2
+  • Section 4
+
+Sections fully commented-out and removed:
+  • Original Section 2
+
+Renumbering applied to remaining sections:
+  • 1 → 1
+  • 4 → 2
+  • 5 → 3
+  • 6 → 4
+
+Global replacements:
+  • All occurrences of '_bdi', '_bdi_', 'bdi_', 'bdi' → 'war'
+=============================
+```
+
 ---
 
 ## 🧠 Supported Replacements
@@ -105,7 +126,7 @@ This tool is 100% Python standard library. No pip installs needed.
 
 ## 👨‍💻 Author
 
-Built by **Your Name**
+Built by **Debarun Ghosh**
 
 📫 Reach me on GitHub for contributions, issues, or feature requests.
 
