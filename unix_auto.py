@@ -154,7 +154,7 @@ def main():
     renum_map = {s["orig_num"]: idx + 1 for idx, s in enumerate(active)}
 
     # Apply header renumbering by Section N
-    header_re = re.compile(r'^(#?\s*if\s+Jobstep\s+"Section\s+)(\d+)(:.*?;\s*then)', re.IGNORECASE)
+    header_re = re.compile(r'^(#?.*Section\s+)(\d+)(:.*)$', re.IGNORECASE)
     for idx, ln in enumerate(new_lines):
         m = header_re.search(ln)
         if m:
