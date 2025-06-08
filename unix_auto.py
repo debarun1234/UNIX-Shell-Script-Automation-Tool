@@ -66,9 +66,9 @@ def prefix_comment(line):
     indent = re.match(r'^(\s*)', line).group(1)
     stripped = line.lstrip().rstrip('\n')
     if stripped.startswith("if ") or stripped == "fi":
-        return f"{indent}#{stripped}\n"
+        return f"{indent}#{stripped} -> commented due to 2AOR Migration\n"
     else:
-        return f"{indent}# {stripped}\n"
+        return f"{indent}# {stripped} -> commented due to 2AOR Migration\n"
 
 def main():
     args = parse_args()
