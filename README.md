@@ -1,21 +1,21 @@
 # 🛠️ UNIX Shell Script Automation Tool
 
-A powerful Python-based tool that automates commenting of lines in UNIX `.sh` scripts based on user-defined exclusion keywords, with intelligent section tracking, renumbering, and global replacements.
+A powerful Python-based tool that automates commenting of lines in UNIX `.sh` scripts based on user-defined exclusion keywords, with intelligent section tracking, full-block commenting, renumbering, and global replacements.
 
 ---
 
 ## 🚀 Features
 
-- ✅ Parses `.sh` scripts and identifies `Section N` blocks  
-- 📝 Accepts a `.txt` file with comma-separated exclusion keywords  
-- 🔍 Scans each section for keyword matches and comments matching lines  
-- 🧠 Tracks sections where changes were made  
-- ❌ Fully comments out entire sections if all lines are matched  
-- 🔢 Automatically renumbers remaining sections  
-- 🔁 Globally replaces all variants of `bdi` (e.g. `_bdi_`, `bdi_`) with `"war"`  
-- 📄 Optional changelog summary with section-wise details  
-- 💡 Skips lines that were originally commented  
-- 🔐 Non-destructive and easy to use  
+- ✅ Parses `.sh` scripts and identifies `Section N:` blocks (with case-insensitive and position-flexible matching)
+- 📝 Accepts a `.txt` file with comma-separated exclusion keywords
+- 🔍 Scans each section for keyword matches and comments matching lines
+- 🧠 Tracks which sections were modified
+- ❌ Fully comments out the entire section (`if`, lines, and `fi`) if all lines get commented
+- 🔢 Automatically renumbers remaining sections using `Section N:` logic, even inside commented lines
+- 🔁 Globally replaces all variants of `bdi` (`_bdi_`, `_bdi`, `bdi_`, `bdi`) with `"war"`
+- 📄 Optional changelog summary with section-wise breakdown and renumbering map
+- 💡 Skips originally commented lines (doesn't double-comment)
+- 🔐 Works on mixed-style shell scripts with `; then fi`, varying indentation, and flexible formats
 
 ---
 
@@ -41,8 +41,8 @@ cd unix-script-automation
 
 ### 2. Prepare Your Files
 
-- Place your shell script (e.g. `myscript.sh`) in the repo  
-- Prepare a `keywords.txt` file with comma-separated keywords (e.g., `db2_connect,db2_sql,GetTransNode`)  
+- Place your shell script (e.g. `myscript.sh`) in the repo
+- Prepare a `keywords.txt` file with comma-separated keywords (e.g., `db2_connect,db2_sql,GetTransNode`)
 
 ### 3. Run the Tool
 
@@ -58,23 +58,25 @@ python3 unix_auto.py myscript.sh keywords.txt -o modified_script.sh
 
 **Input Section:**
 ```bash
-# Section 3: Data Transformation
+if JobStep "Section 3: Data Transformation" ; then
 Template="Customer"
 Sort --column name
 GetTransNode
 normalize_data
+fi
 ```
 
 **After running the tool with matching keywords:**
 ```bash
-# Section 2: Data Transformation
+#if JobStep "Section 2: Data Transformation" ; then
 # Template="Customer"
 # Sort --column name
 # GetTransNode
 # normalize_data
+#fi
 ```
 
-> If all lines in a section are commented, it renumbers the next section accordingly.
+> If all lines in a section are commented, it comments the entire block and renumbers subsequent sections.
 
 ---
 
