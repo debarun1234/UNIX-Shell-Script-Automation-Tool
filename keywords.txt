@@ -1,7 +1,7 @@
 GetFileArrDTM,
 Template,
 Sort,
-getfilebypasses,
+getfilebypass,
 GetMinMaxValues,
 GetTransNode,
 RefreshZonemap,
@@ -10,4 +10,5 @@ db_chunk_size,
 db2_connect,
 db2_disconnect,
 db2_load,
-db2_sql
+db2_sql,
+Sqlstats

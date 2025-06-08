@@ -23,150 +23,175 @@ def parse_args():
     return p.parse_args()
 
 def load_keywords(txt_path):
-    text = txt_path.read_text()
-    # split on commas, strip whitespace, ignore empty
+    text = txt_path.read_text(encoding="utf-8")
     return [kw.strip() for kw in text.split(",") if kw.strip()]
 
 def detect_sections(lines):
     """
-    Detect "Section N" headers anywhere in the file.
-    Returns a list of dicts with keys:
-      - orig_num (int)
-      - header_idx (int)
-      - header_prefix (str)
-      - header_rest (str)
-      - start_idx (int), end_idx (int) to be filled later
+    Detect active sections defined using:
+      if Jobstep "Section N: description" ; then
+      ...
+      fi
+    Ignore commented-out headers.
     """
-    sec_re = re.compile(r'^(?P<prefix>\s*(?:#\s*)*Section\s+)(?P<num>\d+)(?P<rest>.*)$')
-    secs = []
-    for i, ln in enumerate(lines):
-        m = sec_re.match(ln)
+    sections = []
+    start_re = re.compile(r'^.*Section\s+(\d+):.*$', re.IGNORECASE)
+    end_re   = re.compile(r'^\s*fi\s*$', re.IGNORECASE)
+    i = 0
+    while i < len(lines):
+        if lines[i].lstrip().startswith("#"):
+            i += 1
+            continue
+        m = start_re.match(lines[i])
         if m:
-            secs.append({
-                "orig_num": int(m.group("num")),
-                "header_idx": i,
-                "header_prefix": m.group("prefix"),
-                "header_rest": m.group("rest"),
-                # placeholders
-                "start_idx": i,
-                "end_idx": None,
+            sec_num = int(m.group(1))
+            start_idx = i
+            i += 1
+            while i < len(lines) and not end_re.match(lines[i]):
+                i += 1
+            end_idx = i if i < len(lines) else len(lines) - 1
+            sections.append({
+                "orig_num": sec_num,
+                "header_idx": start_idx,
+                "start_idx": start_idx,
+                "end_idx": end_idx
             })
-    # set end_idx for each section
-    for idx, sec in enumerate(secs):
-        start = sec["header_idx"]
-        end = (secs[idx+1]["header_idx"] - 1) if idx+1 < len(secs) else (len(lines)-1)
-        sec["start_idx"] = start
-        sec["end_idx"] = end
-    return secs
+        i += 1
+    return sections
 
 def prefix_comment(line):
-    # preserve leading whitespace indent, then "# "
+    """
+    Comment a line, using '#' for headers/footers and '# ' for others.
+    """
     indent = re.match(r'^(\s*)', line).group(1)
-    return f"{indent}# {line.lstrip()}"
+    stripped = line.lstrip().rstrip('\n')
+    if stripped.startswith("if ") or stripped == "fi":
+        return f"{indent}#{stripped}\n"
+    else:
+        return f"{indent}# {stripped}\n"
 
 def main():
     args = parse_args()
+    # Load and preprocess inline `; then fi` lines
+    raw = args.script.read_text(encoding="utf-8").splitlines(keepends=True)
+    orig_lines = []
+    for ln in raw:
+        stripped = ln.rstrip("\r\n")
+        if '; then' in stripped and stripped.strip().endswith('fi'):
+            head = stripped[:stripped.rfind('; then') + len('; then')]
+            orig_lines.append(f"{head}\n")
+            orig_lines.append("fi\n")
+        else:
+            orig_lines.append(ln)
+    new_lines = orig_lines.copy()
 
-    # 1. Load files
-    orig_lines = args.script.read_text(encoding="utf-8").splitlines(keepends=True)
+    # Load keywords
     keywords = load_keywords(args.keywords)
     if not keywords:
         print("No keywords found in your .txt file; exiting.")
         sys.exit(1)
 
-    # original commented flags
+    # Mark originally commented lines
     orig_commented = [ln.lstrip().startswith("#") for ln in orig_lines]
-    new_lines = orig_lines.copy()
 
-    # 2. Detect sections
+    # Detect sections
     sections = detect_sections(orig_lines)
     if not sections:
-        print("No sections detected (no 'Section N' headers). Exiting.")
+        print("No sections detected. Exiting.")
         sys.exit(1)
 
-    # 3. Keyword-based line commenting
+    # Comment lines matching keywords
     mod_sections = set()
     for sec in sections:
         num = sec["orig_num"]
-        for i in range(sec["start_idx"]+1, sec["end_idx"]+1):
-            line = new_lines[i]
+        for i in range(sec["start_idx"] + 1, sec["end_idx"]):
             if orig_commented[i]:
                 continue
             for kw in keywords:
-                if kw in line:
-                    new_lines[i] = prefix_comment(line)
+                if kw in new_lines[i]:
+                    new_lines[i] = prefix_comment(new_lines[i])
                     mod_sections.add(num)
                     break
 
-    # 4. Detect fully commented sections
+    # Detect fully commented sections and comment header/footer
     fully_commented = set()
     for sec in sections:
         num = sec["orig_num"]
-        # check all non-blank lines in section
+        start = sec["start_idx"]
+        end = sec["end_idx"]
         all_commented = True
-        for i in range(sec["start_idx"]+1, sec["end_idx"]+1):
-            ln = new_lines[i]
-            if ln.strip() == "":
+
+        for i in range(start, end + 1):
+            if new_lines[i].strip() == "":
                 continue
-            if not ln.lstrip().startswith("#"):
+            if not new_lines[i].lstrip().startswith("#"):
                 all_commented = False
                 break
-        if all_commented and num in mod_sections:
+
+        if all_commented:
             fully_commented.add(num)
-            # comment the header too, if not already
-            hi = sec["header_idx"]
-            if not new_lines[hi].lstrip().startswith("#"):
-                new_lines[hi] = prefix_comment(new_lines[hi])
+        else:
+            # Now check if all lines EXCEPT the header and fi are commented
+            body_commented = True
+            for i in range(start + 1, end):  # body only
+                if new_lines[i].strip() == "":
+                    continue
+                if not new_lines[i].lstrip().startswith("#"):
+                    body_commented = False
+                    break
 
-    # 5. Renumber remaining sections
-    # build mapping old → new
-    remaining = [sec["orig_num"] for sec in sections if sec["orig_num"] not in fully_commented]
-    remaining.sort()
-    renum_map = {old: new for new, old in enumerate(remaining, start=1)}
+            if body_commented:
+                fully_commented.add(num)
+                # Comment the header and fi if not already
+                if not new_lines[start].lstrip().startswith("#"):
+                    new_lines[start] = prefix_comment(new_lines[start])
+                if not new_lines[end].lstrip().startswith("#"):
+                    new_lines[end] = prefix_comment(new_lines[end])
 
-    sec_re = re.compile(r'^(?P<prefix>\s*(?:#\s*)*Section\s+)(?P<num>\d+)(?P<rest>.*)$')
+    # Build renumber map: only active sections, in file order
+    active = [s for s in sections if s["orig_num"] not in fully_commented]
+    active.sort(key=lambda s: s["header_idx"])
+    renum_map = {s["orig_num"]: idx + 1 for idx, s in enumerate(active)}
+
+    # Apply header renumbering by Section N
+    header_re = re.compile(r'^(#?\s*if\s+Jobstep\s+"Section\s+)(\d+)(:.*?;\s*then)', re.IGNORECASE)
     for idx, ln in enumerate(new_lines):
-        m = sec_re.match(ln)
+        m = header_re.search(ln)
         if m:
-            old = int(m.group("num"))
+            old = int(m.group(2))
             if old in renum_map:
-                new_num = renum_map[old]
-                new_lines[idx] = f"{m.group('prefix')}{new_num}{m.group('rest')}\n"
+                new_lines[idx] = f"{m.group(1)}{renum_map[old]}{m.group(3)}\n"
 
-    # 6. Global replacement of bdi variants → "war"
-    # longest patterns first
-    patterns = ["_bdi_", "_bdi", "bdi_", "bdi"]
+
+    # Global replace of bdi variants → war
     for idx, ln in enumerate(new_lines):
-        for pat in patterns:
+        for pat in ("_bdi_", "_bdi", "bdi_", "bdi"):
             if pat in ln:
                 new_lines[idx] = new_lines[idx].replace(pat, "war")
 
-    # 7. Write output
+    # Write output
     args.output.write_text("".join(new_lines), encoding="utf-8")
     print(f"\nModified script saved to: {args.output}")
 
-    # 8. Optional changelog summary
-    want = input("Do you want a changelog summary? (y/n): ").strip().lower()
-    if want == "y":
+    # Changelog summary
+    if input("Do you want a changelog summary? (y/n): ").strip().lower() == "y":
         print("\n===== CHANGELOG SUMMARY =====")
         if not mod_sections:
-            print("No lines matched the keywords; no changes were made.")
+            print("No lines matched; no changes made.")
         else:
             print("Sections with keyword-based commenting:")
-            for num in sorted(mod_sections):
-                print(f"  • Section {num}")
+            for n in sorted(mod_sections):
+                print(f"  • Section {n}")
             if fully_commented:
                 print("\nSections fully commented-out and removed:")
-                for num in sorted(fully_commented):
-                    print(f"  • Original Section {num}")
-                print("\nRenumbering applied to remaining sections as follows:")
+                for n in sorted(fully_commented):
+                    print(f"  • Original Section {n}")
+                print("\nRenumbering applied to remaining sections:")
                 for old, new in renum_map.items():
                     print(f"  • {old} → {new}")
             print("\nGlobal replacements:")
-            print("  • All occurrences of '_bdi', '_bdi_', 'bdi_', 'bdi' replaced with 'war'.")
-        print("=============================\n")
-    else:
-        print("Done. No summary requested.")
+            print("  • All occurrences of '_bdi', '_bdi_', 'bdi_', 'bdi' → 'war'")
+        print("=============================")
 
 if __name__ == "__main__":
     main()
