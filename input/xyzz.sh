@@ -132,109 +132,6 @@ function MainProcess {
                 ;;
         esac
     fi
-
-    if JobStep "Section 9: Process files with loops"; then
-        stamp "Section 9: Process files with loops" >> $log
-        
-        # C-style for loop (restricted)
-        for (( i=0; i<5; i++ )); do
-            stamp "Processing iteration: $i" >> $log
-            GetTransNode
-            db_chunk_size
-        done
-        
-        # List-based for loop (unrestricted)
-        for file_type in "quotes" "trades" "orders"; do
-            stamp "Processing file type: $file_type" >> $log
-            Template
-            Sort
-            ChunkSql
-        done
-        
-        # Range-based for loop
-        for day in {1..7}; do
-            stamp "Processing day: $day" >> $log
-            RefreshZonemap
-            db2_sql
-        done
-    fi
-
-    if JobStep "Section 10: Process with until and select loops"; then
-        stamp "Section 10: Process with until and select loops" >> $log
-        
-        # Until loop with numeric condition
-        retry_count=5
-        until [ $retry_count -eq 0 ]; do
-            stamp "Retry attempt remaining: $retry_count" >> $log
-            GetTransNode
-            db_chunk_size
-            retry_count=$((retry_count - 1))
-        done
-        
-        # Until loop with file check (unrestricted)
-        until [ -f "$COMPLETED_FLAG" ]; do
-            stamp "Waiting for completion flag" >> $log
-            Template
-            Sort
-            sleep 30
-        done
-        
-        # Select loop for environment selection
-        select environment in "DEV" "TEST" "PROD" "EXIT"; do
-            case $environment in
-                DEV)
-                    stamp "Selected Development environment" >> $log
-                    RefreshZonemap
-                    break
-                    ;;
-                TEST)
-                    stamp "Selected Test environment" >> $log
-                    ChunkSql
-                    break
-                    ;;
-                PROD)
-                    stamp "Selected Production environment" >> $log
-                    GetMinMaxValues
-                    db2_load
-                    break
-                    ;;
-                EXIT)
-                    stamp "Exiting selection" >> $log
-                    break
-                    ;;
-                *)
-                    stamp "Invalid selection: $REPLY" >> $log
-                    GetFileArrDTM
-                    ;;
-            esac
-        done
-        
-        # Select loop for file types (unrestricted)
-        select file_type in quotes trades orders summary all; do
-            stamp "Processing file type: $file_type" >> $log
-            case $file_type in
-                quotes)
-                    Sqlstats
-                    db2_sql
-                    ;;
-                trades | orders)
-                    db2_connect
-                    db2_disconnect
-                    ;;
-                summary)
-                    Template
-                    ;;
-                all)
-                    stamp "Processing all file types" >> $log
-                    Sort
-                    break
-                    ;;
-                *)
-                    stamp "Unknown file type selected" >> $log
-                    ;;
-            esac
-        done
-    fi
 }
 
 function emptysrcfile {
@@ -247,9 +144,9 @@ function emptysrcfile {
     GetTransNode
     
     case $NOTIFICATION_TYPE in
-        EMAIL)
-            echo "Source file $vSrcFile received on $(date +%Y-%m-%d) is empty" | mail -s "$subject" "$recipients"
-            ;;
+        # EMAIL)
+            # echo "Source file $vSrcFile received on $(date +%Y-%m-%d) is empty" | mail -s "$subject" "$recipients"
+            # ;;
         SMS)
             stamp "Sending SMS notification" >> $log
             getfilebypass
@@ -264,31 +161,6 @@ function emptysrcfile {
             ;;
     esac
     
-    # Loop through retry attempts
-    for (( attempt=1; attempt<=3; attempt++ )); do
-        stamp "Notification attempt: $attempt" >> $log
-        GetMinMaxValues
-        if [[ $? -eq 0 ]]; then
-            break
-        fi
-    done
-    
-    # Process different notification channels
-    for channel in "primary" "secondary" "backup"; do
-        stamp "Checking $channel notification channel" >> $log
-        getfilebyepass
-        db2_disconnect
-    done
-    
-    # Until loop for connection retry
-    connection_attempts=0
-    until [ $connection_attempts -ge 5 ] || [ "$CONNECTION_STATUS" = "SUCCESS" ]; do
-        stamp "Database connection attempt: $((connection_attempts + 1))" >> $log
-        getfilebypass
-        db2_disconnect
-        connection_attempts=$((connection_attempts + 1))
-    done
-    
     Checkrc -r $?
     getfilebypass
     return 0
@@ -296,40 +168,6 @@ function emptysrcfile {
 
 function processDataFiles {
     stamp "Processing data files with advanced loops" >> $log
-    
-    # Array-based for loop
-    declare -a file_extensions=("gz" "txt" "csv" "dat")
-    for ext in "${file_extensions[@]}"; do
-        stamp "Processing .$ext files" >> $log
-        GetFileArrDTM
-        Template
-    done
-    
-    # While loop with counter
-    counter=0
-    while [[ $counter -lt 10 ]]; do
-        stamp "Processing batch: $counter" >> $log
-        Sorte
-        db2_load
-        ((counter++))
-    done
-    
-    # While loop reading from file
-    while IFS= read -r line; do
-        stamp "Processing line: $line" >> $log
-        ChunkSql
-        Sqlstats
-    done < "$datafile"
-    
-    # Until loop for data processing completion
-    processed_files=0
-    total_files=100
-    until [ $processed_files -ge $total_files ]; do
-        stamp "Processed $processed_files of $total_files files" >> $log
-        GetFileArrDTM
-        Template
-        processed_files=$((processed_files + 10))
-    done
     
     # Select loop for processing mode
     select mode in "FAST" "NORMAL" "THOROUGH" "SKIP"; do
