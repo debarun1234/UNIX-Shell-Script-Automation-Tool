@@ -19,10 +19,20 @@ from datetime import datetime
 def parse_args():
     p = argparse.ArgumentParser(description="Complete shell script automation tool")
     p.add_argument("script", type=Path, help="Input .sh script")
-    p.add_argument("keywords", type=Path, help="Keywords file")
-    p.add_argument("-o", "--output", type=Path, default=Path("modified.sh"), help="Output file")
+    # Remove keywords argument, always use keywords.txt
+    p.add_argument("-o", "--output", type=Path, default=None, help="Output file")
     p.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
-    return p.parse_args()
+    args = p.parse_args()
+    # If output is not specified, generate it from input script
+    if args.output is None:
+        stem = args.script.stem
+        suffix = args.script.suffix
+        parent = args.script.parent
+        output_name = f"{stem}_modified{suffix}" if suffix else f"{stem}_modified"
+        args.output = parent / output_name
+    # Always use keywords.txt in the script's directory
+    args.keywords = Path(__file__).parent / "keywords.txt"
+    return args
 
 def load_keywords(txt_path):
     """Load keywords from file."""
@@ -410,9 +420,29 @@ def check_fully_commented_structures(lines, sections, functions, loops, keywords
     fully_comented_sections = set()
     fully_comented_functions = set()
     fully_comented_loops = set()
-    
+    fully_comented_subsections = set()  # NEW: Track fully commented subsections
+
     # Check sections - more sophisticated logic
     for section in sections:
+        # Check subsections
+        for subsection in section['subsections']:
+            all_content_commented = True
+            has_content = False
+            for i in range(subsection['start'] + 1, subsection['end'] + 1):
+                line = lines[i]
+                line_content = line.strip()
+                if line_content == "":
+                    continue
+                if not line.lstrip().startswith("#"):
+                    all_content_commented = False
+                    break
+                has_content = True
+            if has_content and all_content_commented:
+                fully_comented_subsections.add(subsection['start'])
+                # Comment the stamp line if not already commented
+                if not lines[subsection['start']].lstrip().startswith("#"):
+                    lines[subsection['start']] = comment_line(lines[subsection['start']])
+
         # Check if all non-empty, non-stamp content lines are commented
         all_content_commented = True
         has_content = False
@@ -539,10 +569,12 @@ def check_fully_commented_structures(lines, sections, functions, loops, keywords
                 not lines[loop['end']].lstrip().startswith("#")):
                 lines[loop['end']] = comment_line(lines[loop['end']])
     
-    return fully_comented_sections, fully_comented_functions, fully_comented_loops
+    return fully_comented_sections, fully_comented_functions, fully_comented_loops, fully_comented_subsections
 
-def renumber_sections(lines, sections, fully_comented_sections):
+def renumber_sections(lines, sections, fully_comented_sections, fully_comented_subsections=None):
     """Renumber only active (non-fully-commented) sections and their stamp commands."""
+    if fully_comented_subsections is None:
+        fully_comented_subsections = set()
     active_sections = [s for s in sections if s['num'] not in fully_comented_sections]
     active_sections.sort(key=lambda s: s['start'])
     
@@ -563,46 +595,31 @@ def renumber_sections(lines, sections, fully_comented_sections):
         )
         lines[section['start']] = updated_header
         
-        # Update stamp commands within this section to use new section numbering
-        update_stamp_commands_in_section(lines, section, new_num)
+        # Update stamp commands within this section to use the new section numbering, skipping fully commented subsections
+        update_stamp_commands_in_section(lines, section, new_num, fully_comented_subsections)
     
     return renumber_map
 
-def update_stamp_commands_in_section(lines, section, new_section_num):
-    """Update stamp commands within a section to use the new section numbering."""
-    
-    # Pattern 1: stamp "Section X.Y: description" 
-    stamp_pattern_subsection = re.compile(r'^(\s*#?\s*stamp\s+"[^"]*Section\s+)(\d+)(\.\d+[^"]*")', re.IGNORECASE)
-    
-    # Pattern 2: stamp "Section X: description" (should become Section X.1: description)
-    stamp_pattern_main = re.compile(r'^(\s*#?\s*stamp\s+"[^"]*Section\s+)(\d+)(:[^"]*")', re.IGNORECASE)
-    
+def update_stamp_commands_in_section(lines, section, new_section_num, fully_comented_subsections=None):
+    """Update stamp commands within a section to use the new section numbering, skipping fully commented subsections."""
+    if fully_comented_subsections is None:
+        fully_comented_subsections = set()
+    # Pattern: stamp "Section X(.Y)?: description"
+    stamp_pattern = re.compile(r'^(\s*#?\s*stamp\s+"[^"]*Section\s+)(\d+)(?:\.(\d+))?(:[^\"]*")', re.IGNORECASE)
+    subsection_counter = 1
     for i in range(section['start'], section['end'] + 1):
+        if i in fully_comented_subsections:
+            continue  # Skip fully commented subsections
         line = lines[i]
-        
-        # First check for subsection pattern (Section X.Y)
-        match = stamp_pattern_subsection.match(line)
+        match = stamp_pattern.match(line)
         if match:
             old_section_num = int(match.group(2))
             if old_section_num == section['num']:
-                # Update the section number but keep the subsection number
-                # Get everything after the matched pattern
                 rest_of_line = line[match.end():]
-                updated_line = f"{match.group(1)}{new_section_num}{match.group(3)}{rest_of_line}"
+                # Always use Section X.Y: ...
+                updated_line = f"{match.group(1)}{new_section_num}.{subsection_counter}{match.group(4)}{rest_of_line}"
                 lines[i] = updated_line
-                continue
-        
-        # Then check for main section pattern (Section X:) and convert to Section X.1:
-        match = stamp_pattern_main.match(line)
-        if match:
-            old_section_num = int(match.group(2))
-            if old_section_num == section['num']:
-                # Convert "Section X:" to "Section X.1:"
-                description = match.group(3)[1:]  # Remove the colon, keep the closing quote
-                # Get everything after the matched pattern
-                rest_of_line = line[match.end():]
-                updated_line = f"{match.group(1)}{new_section_num}.1:{description}{rest_of_line}"
-                lines[i] = updated_line
+                subsection_counter += 1
                 continue
 
 def apply_global_replacements(lines):
@@ -982,11 +999,11 @@ def process_script(script_path, keywords_path, output_path, verbose=False):
     # Handle case branches and cases
     comment_case_branches_and_cases(new_lines, cases, keywords)
     # Check for fully commented structures (sections, functions, loops) and comment them if needed
-    fully_comented_sections, fully_comented_functions, fully_comented_loops = check_fully_commented_structures(
+    fully_comented_sections, fully_comented_functions, fully_comented_loops, fully_comented_subsections = check_fully_commented_structures(
         new_lines, sections, functions, loops, keywords
     )
     # Renumber active sections
-    renumber_map = renumber_sections(new_lines, sections, fully_comented_sections)
+    renumber_map = renumber_sections(new_lines, sections, fully_comented_sections, fully_comented_subsections)
     # Apply global replacements
     global_replacements = apply_global_replacements(new_lines)
     # Generate and insert changelog

@@ -78,7 +78,8 @@ function MainProcess {
         SqlExecute -t oracle -f $bindir/SvScript.get_date_parm_file.sql -l $log
 
         stamp "Section 3.3: Create parameter file and pass PROC_DT" >> $log
-        cat Sdatadir/SvScript.get_date_parm_file.txt >> Stmpdir/SvScript.param
+        db_chunk_size
+        # cat Sdatadir/SvScript.get_date_parm_file.txt >> Stmpdir/SvScript.param
 
         stamp "Section 3.4: Calling the powermart session to create insert file from the source file" >> $log
         Runworkflow -f UDM_STG -s wf_m_dly_optns_quots -e 1 -l $log
@@ -98,7 +99,6 @@ function MainProcess {
     if JobStep "Section 6: Run stats on SvTgtTable"; then
         stamp "Section 6: Run stats on $vTgtTable" >> $log
         db_chunk_size
-
     fi
 
     if JobStep "Section 7: Purge data older than 7 days"; then
